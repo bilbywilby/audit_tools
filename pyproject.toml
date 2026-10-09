@@ -1,0 +1,16 @@
+[project]
+name = "audit_tools"
+version = "2.0.0"
+description = "Static triage of AndroidManifest.xml"
+requires-python = ">=3.11"
+dependencies = [
+  "click>=8.1.7",
+  "lxml>=4.9.3",
+]
+
+[project.scripts]
+audit_manifest = "audit_manifest:cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

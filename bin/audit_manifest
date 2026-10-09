@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+PYTHONPATH="${HOME}/audit_tools/src${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m audit_manifest "$@"

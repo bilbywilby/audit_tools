@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+
+ROOT="${HOME}/audit_tools"
+
+cd "$ROOT"
+git init
+git add .
+git commit -m "Initial audit_tools repo"
+echo "[+] git repository initialized and first commit created"
