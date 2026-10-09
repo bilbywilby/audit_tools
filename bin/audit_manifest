@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 umask 077
-PYTHONPATH="${HOME}/audit_tools/src${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m audit_manifest "$@"
+SRC="${HOME}/audit_tools/src"
+if [ -f "$SRC/audit_manifest.py" ]; then
+    PYTHONPATH="$SRC${PYTHONPATH:+:$PYTHONPATH}" exec python3 "$SRC/audit_manifest.py" "$@"
+fi
+# fall back to installed entry point
+exec audit_manifest "$@"
