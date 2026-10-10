@@ -1,0 +1,170 @@
+================================================================================
+AUDIT_TOOLS - POWER WILDCARDS
+Simple on surface | Powerful underneath
+================================================================================
+
+================================================================================
+WILDCARD #1: BATCH SCAN GLOB (*.{apk,xml,manifest})
+================================================================================
+Surface:   bin/audit_manifest scans/*.apk
+Underneath: Automatically extracts ANDROIDMANIFEST.XML from each APK,
+            generates timestamped reports, aggregates results into summary.json
+
+Pattern:   scans/*.{apk,aab,xml}
+Output:    artifacts/{filename}_scan_{timestamp}.{txt,html,json}
+
+Command:
+  bin/audit_manifest projects/*/AndroidManifest.xml
+
+Hidden Power:
+  - Processes entire project directories recursively
+  - Creates index.html linking all reports together
+  - Detects duplicate manifests across monorepo
+  - Generates CSV aggregation of all findings
+
+================================================================================
+WILDCARD #2: SEVERITY FILTER (--level !HIGH or --level >=MEDIUM)
+================================================================================
+Surface:   bin/audit_manifest app.xml --level "!HIGH"
+Underneath: Negation filter, regex matching, threshold comparison,
+            severity arithmetic (e.g., ">=MEDIUM" = MEDIUM or higher)
+
+Patterns:
+  --level HIGH              # Only HIGH issues
+  --level ">=MEDIUM"        # MEDIUM and above
+  --level "!HIGH"           # Everything EXCEPT HIGH
+  --level "MEDIUM,LOW"      # Specific comma-separated list
+  --level "*SMS*"           # Regex: contains SMS
+
+Output:   Filtered results with count adjustment
+
+Hidden Power:
+  - Combine filters: "--level '!INFO' --level '*SMS*'"
+  - Negative lookups: "--level '!DEBUG*' 'EXPORTED*'"
+  - Arithmetic thresholds: "--max-high 2" (fail CI if >2 HIGH)
+
+================================================================================
+WILDCARD #3: OUTPUT TEMPLATE ({package}_{date}_{severity})
+================================================================================
+Surface:   bin/audit_manifest app.xml -o "reports/{package}.html"
+Underneath: Template variables expand to dynamic values,
+            auto-create directories, collision avoidance with timestamps
+
+Variables:
+  {package}      → com.example.app
+  {filename}     → AndroidManifest.xml
+  {basename}     → AndroidManifest
+  {date}         → 2026-10-10
+  {time}         → 14-32-05
+  {datetime}     → 2026-10-10_14-32-05
+  {severity}     → HIGH|MEDIUM|LOW|INFO (creates per-severity folders)
+  {issue_count}  → 12 (numeric count)
+  {sha_short}    → f014a0b (first 7 chars of hash)
+
+Command:
+  bin/audit_manifest app.xml -o "reports/{package}/{date}/report.html"
+
+Hidden Power:
+  - Auto-organizes by package name hierarchy
+  - Groups audits chronologically for regression tracking
+  - Creates searchable archive structure
+  - Enables diff-based security review workflows
+
+================================================================================
+WILDCARD #4: PERMISSION OVERRIDE (+custom,-existing)
+================================================================================
+Surface:   bin/audit_manifest app.xml --perms "+MY_CUSTOM_PERM,+android.permission.FOO"
+Underneath: Runtime modification of RISKY_PERMS dictionary,
+            adds new rules without code changes, persists in config file
+
+Syntax:
+  +PERM_NAME:SEVERITY       # Add custom rule
+  -PERM_NAME                # Remove existing rule
+  *=NEW_SEVERITY            # Reclassify existing rule
+  @config.yaml              # Load full override file
+
+Examples:
+  --perms "+com.myorg.FEATURE_FLAG:INFO"
+  --perms "-READ_SMS"              # Ignore this permission
+  --perms "SYSTEM_ALERT_WINDOW=LOW" # Downgrade severity
+  --perms "@my_custom_rules.yaml"   # Full config override
+
+Hidden Power:
+  - Team-specific compliance rules (PCI, HIPAA, SOC2)
+  - Temporary waivers during migration periods
+  - Client-specific policy injection
+  - CI/CD policy-as-code integration
+
+================================================================================
+WILDCARD #5: COMPONENT MATCHER (--component "*.Service" --exclude "Internal*")
+================================================================================
+Surface:   bin/audit_manifest app.xml --component "*.Service" --exclude "Debug*"
+Underneath: Glob matching on component names, negation patterns,
+            component type filtering, intent-action based grouping
+
+Patterns:
+  --component "*.Service"        # All services
+  --component ".MainActivity"    # Single class
+  --exclude "Test*"             # Skip test components
+  --include "*Provider"         # Only providers
+  --type activity,service        # Specific component types only
+  --has-intent-boot              # Filter by intent action presence
+
+Commands:
+  bin/audit_manifest app.xml --component "*.*Provider" --level "!INFO"
+  bin/audit_manifest app.xml --type receiver --exclude "System*"
+
+Hidden Power:
+  - Focus audit on attack surface (providers/services only)
+  - Exclude known-trusted internal libraries
+  - Audit specific feature modules in monolith
+  - Regression testing after refactoring (track renamed components)
+
+================================================================================
+COMBINED EXAMPLES (Wildcards Chaining Together)
+================================================================================
+
+# Batch audit entire apps directory, skip debug builds
+bin/audit_manifest apps/**/AndroidManifest.xml \
+  --level "!INFO" \
+  -o "reports/{package}_{severity}/{date}.html"
+
+# Find all exported providers with SMS permissions
+bin/audit_manifest app.xml \
+  --component "*Provider*" \
+  --perms "+*SMS*:HIGH" \
+  --level "HIGH" \
+  --json > sms_providers.json
+
+# Continuous monitoring: exclude known-safe libraries, track regressions
+bin/audit_manifest manifest.xml \
+  --perms "@company_rules.yaml" \
+  --exclude "com.google.*" "androidx.*" \
+  --max-high 1 \
+  --exit-code-on-violation
+
+# Historical comparison (needs SQLite backend extension)
+bin/audit_manifest current.xml \
+  --compare artifacts/latest/manifest.xml \
+  --diff-mode severity-change \
+  --output artifacts/diff_report.html
+
+================================================================================
+ENVIRONMENT VARIABLES FOR PERSISTENT WILDCARDS
+================================================================================
+
+# Set default severity threshold
+export AUDIT_MIN_LEVEL=MEDIUM
+
+# Auto-save all reports to configured path
+export AUDIT_OUTPUT_TEMPLATE="~/security-audits/{package}/{date}/report.html"
+
+# Company-wide permission overrides
+export AUDIT_RULES_FILE="/etc/audit/compliance.yaml"
+
+# Exit non-zero on any HIGH (CI integration)
+export AUDIT_EXIT_CODE_ON_HIGH=true
+
+================================================================================
+END OF WILDCARDS DOCUMENTATION
+================================================================================

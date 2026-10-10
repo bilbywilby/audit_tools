@@ -1,0 +1,58 @@
+{
+  "document": {
+    "title": "Audit Tools Project Handover",
+    "version": "1.2",
+    "status": "DRAFT - environment verified 2026-10-10; remaining items tracked below",
+    "created_date": "2026-10-10",
+    "review_required": true
+  },
+  "verification_record": {
+    "environment_date": "2026-10-10T03:56:39Z",
+    "python": "3.13.5",
+    "lxml": "6.1.3",
+    "pytest": "9.1.1",
+    "test_result": "2 passed",
+    "script_version": "setup_audit_tools.sh v1.0"
+  },
+  "usage": {
+    "launcher": "bin/audit_manifest",
+    "verified_options": {
+      "--format {text,json,html}": "VERIFIED via --help. No --html/--json shorthands exist.",
+      "--out": "VERIFIED: parent directories are created automatically.",
+      "--severity {HIGH,MEDIUM,LOW,INFO}": "VERIFIED via --help.",
+      "--ci-mode": "VERIFIED: forces JSON output, fails on HIGH issues.",
+      "--jobs": "VERIFIED via --help.",
+      "-": "stdin XML input, VERIFIED via --help."
+    },
+    "examples": [
+      "bin/audit_manifest tests/fixtures/AndroidManifest_risky.xml",
+      "bin/audit_manifest app.xml --format text --out artifacts/report.txt",
+      "bin/audit_manifest app.xml --format html --out artifacts/report.html",
+      "bin/audit_manifest app.xml --format json --out artifacts/report.json"
+    ]
+  },
+  "setup": {
+    "prerequisites": "sudo apt install python3.13-venv",
+    "commands": [
+      "deactivate 2>/dev/null || true",
+      "rm -rf .venv",
+      "/usr/bin/python3 -m venv .venv",
+      "source .venv/bin/activate",
+      "pip install lxml pytest"
+    ]
+  },
+  "remaining_actions": [
+    {"priority": "HIGH", "action": "Populate ownership_and_access fields (team, owners, tracker).", "status": "OPEN"},
+    {"priority": "MEDIUM", "action": "Pin dependency versions (6.1.3, 9.1.1) for reproducibility.", "status": "OPEN"},
+    {"priority": "MEDIUM", "action": "Verify APK scanning path with apkanalyzer on a real APK.", "status": "OPEN"}
+  ],
+  "ownership_and_access": {
+    "maintaining_team": null,
+    "technical_owner": null,
+    "security_reviewer": null,
+    "issue_tracker": null,
+    "ci_system": null,
+    "release_owner": null,
+    "access_transfer_notes": "Transfer repository, CI, package registry through organization's approved access-management process."
+  }
+}
