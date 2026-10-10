@@ -94,6 +94,8 @@ def triage(root: ET.Element) -> List[Tuple[str, str, str]]:
 @click.argument("manifest", type=click.Path(exists=True, path_type=Path))
 @click.option("--json", "as_json", is_flag=True, help="Emit JSON")
 @click.option("--html", "as_html", is_flag=True, help="Emit HTML report")
+@click.option("--batch", "do_batch", is_flag=True, help="Scan directory")
+@click.option("--recursive", "-r", "recurse", is_flag=True, help="Recursive scan")
 @click.option("--out", type=click.Path(path_type=Path), default=None)
 def cli(manifest: Path, as_json: bool, as_html: bool, out: Path | None):
     root = parse_manifest(manifest)
@@ -121,6 +123,30 @@ def render_html(root, issues, sha):
     return f'''<!doctype html><html><head><meta charset="utf-8">
 <style>body{{font-family:sans-serif;margin:2rem}}table{{border-collapse:collapse;width:100%}}
 td,th{{border:1px solid #ccc;padding:.4rem}}
+
+def batch_scan(directory: Path, recursive: bool = False) -> dict:
+    """Scan all XML files in directory."""
+    pattern = "**/*.xml" if recursive else "*.xml"
+    results = []
+    total_issues = {"HIGH": 0, "MEDIUM": 0, "LOW": 0, "INFO": 0}
+    
+    for xml_file in sorted(directory.glob(pattern)):
+        try:
+            root = parse_manifest(xml_file)
+            issues = triage(root)
+            for sev, _, _ in issues:
+                total_issues[sev] += 1
+            results.append({
+                "file": str(xml_file),
+                "package": root.get("package", "?"),
+                "issues": len(issues),
+                "high": sum(1 for s, _, _ in issues if s == "HIGH"),
+                "medium": sum(1 for s, _, _ in issues if s == "MEDIUM")
+            })
+        except Exception as e:
+            results.append({"file": str(xml_file), "error": str(e)})
+    
+    return {"results": results, "totals": total_issues}
 .HIGH{{background:#ffe1e1}}.MEDIUM{{background:#fff0cc}}
 .LOW{{background:#eef4ff}}.INFO{{background:#f5f5f5}}</style></head><body>
 <h1>Audit Report</h1><p><b>Package:</b> {package}</p><p><b>SHA-256:</b> <code>{sha}</code></p>
