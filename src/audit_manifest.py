@@ -112,3 +112,16 @@ def cli(manifest: Path, as_json: bool, as_html: bool, out: Path | None):
         click.echo(text)
 if __name__ == "__main__":
     cli()
+
+def render_html(root, issues, sha):
+    package = root.get("package", "?")
+    rows = "\n".join(
+        f"<tr><td class='{sev}'><b>{sev}</b></td><td>{loc}</td><td>{msg}</td></tr>"
+        for sev, loc, msg in issues)
+    return f'''<!doctype html><html><head><meta charset="utf-8">
+<style>body{{font-family:sans-serif;margin:2rem}}table{{border-collapse:collapse;width:100%}}
+td,th{{border:1px solid #ccc;padding:.4rem}}
+.HIGH{{background:#ffe1e1}}.MEDIUM{{background:#fff0cc}}
+.LOW{{background:#eef4ff}}.INFO{{background:#f5f5f5}}</style></head><body>
+<h1>Audit Report</h1><p><b>Package:</b> {package}</p><p><b>SHA-256:</b> <code>{sha}</code></p>
+<table><tr><th>Severity</th><th>Location</th><th>Message</th></tr>{rows}</table></body></html>'''
