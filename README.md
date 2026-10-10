@@ -1,12 +1,6 @@
-# audit_tools
+# audit_tools - Android Manifest Security Auditor
 
-Static triage for `AndroidManifest.xml`.
+Scan Android app manifests for security vulnerabilities and configuration issues.
 
-## Install
+## Quick Start
 
-```bash
-cd ~/audit\_tools
-uv pip install -e .
-'''
-EOF'
-EOC

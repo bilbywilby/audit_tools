@@ -23,17 +23,20 @@ SYSTEM_ACTIONS = {
     "android.intent.action.BOOT_COMPLETED", "android.intent.action.MY_PACKAGE_REPLACED",
     "android.intent.action.TIME_SET", "android.intent.action.TIMEZONE_CHANGED",
 }
+
 def sha256_file(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
     return h.hexdigest()
+
 def parse_manifest(path: Path) -> ET.Element:
     try:
         return ET.parse(str(path)).getroot()
     except Exception as e:
         raise click.ClickException(f"XML parse error: {e}")
+
 def triage(root: ET.Element) -> List[Tuple[str, str, str]]:
     sdk = root.find("uses-sdk")
     target = int(sdk.get(f"{A}targetSdkVersion", "0")) if sdk is not None else 0
@@ -90,12 +93,62 @@ def triage(root: ET.Element) -> List[Tuple[str, str, str]]:
                 sev, msg = "INFO", f"exported {el.tag} {name}"
             out.append((sev, f"{el.tag} {name}", msg))
     return sorted(out, key=lambda x: ORDER[x[0]])
+
+def render_html(root, issues, sha):
+    package = root.get("package", "?")
+    rows = "\n".join(
+        f"<tr><td class='{sev}'><b>{sev}</b></td><td>{loc}</td><td>{msg}</td></tr>"
+        for sev, loc, msg in issues)
+    high_count = sum(1 for s,_,_ in issues if s=="HIGH")
+    med_count = sum(1 for s,_,_ in issues if s=="MEDIUM")
+    low_count = sum(1 for s,_,_ in issues if s=="LOW")
+    info_count = sum(1 for s,_,_ in issues if s=="INFO")
+    return f'''<!doctype html>
+<html>
+<head><meta charset="utf-8">
+<title>Audit Report: {package}</title>
+<style>
+body {{ font-family: sans-serif; margin: 2rem; }}
+h1 {{ color: #333; border-bottom: 2px solid #6d4aff; padding-bottom: 0.5rem; }}
+table {{ border-collapse: collapse; width: 100%; }}
+td, th {{ border: 1px solid #ccc; padding: 0.5rem; }}
+th {{ background: #f0f0f0; }}
+.HIGH {{ background: #ffe1e1; color: #c00; }}
+.MEDIUM {{ background: #fff0cc; color: #a60; }}
+.LOW {{ background: #eef4ff; color: #36c; }}
+.INFO {{ background: #f5f5f5; color: #666; }}
+.meta {{ background: #f9f9f9; padding: 1rem; margin-bottom: 1rem; }}
+.code {{ font-family: monospace; word-break: break-all; background: #eee; padding: 0.2rem; }}
+.summary {{ display: flex; gap: 1rem; margin: 1rem 0; }}
+.count {{ padding: 1rem; border-radius: 4px; text-align: center; min-width: 80px; }}
+.count.high {{ background: #ffe1e1; }}
+.count.med {{ background: #fff0cc; }}
+.count.low {{ background: #eef4ff; }}
+.count.info {{ background: #f5f5f5; }}
+</style>
+</head>
+<body>
+<h1>Android Manifest Audit Report</h1>
+<div class="meta">
+<b>Package:</b> {package}<br>
+<b>SHA-256:</b> <code class="code">{sha}</code>
+</div>
+<div class="summary">
+<div class="count high"><b>HIGH</b><br>{high_count}</div>
+<div class="count med"><b>MEDIUM</b><br>{med_count}</div>
+<div class="count low"><b>LOW</b><br>{low_count}</div>
+<div class="count info"><b>INFO</b><br>{info_count}</div>
+</div>
+<table>
+<tr><th>Severity</th><th>Location</th><th>Issue</th></tr>
+{rows if rows else "<tr><td colspan='3'><i>No issues found</i></td></tr>"}
+</table>
+</body></html>'''
+
 @click.command()
 @click.argument("manifest", type=click.Path(exists=True, path_type=Path))
 @click.option("--json", "as_json", is_flag=True, help="Emit JSON")
 @click.option("--html", "as_html", is_flag=True, help="Emit HTML report")
-@click.option("--batch", "do_batch", is_flag=True, help="Scan directory")
-@click.option("--recursive", "-r", "recurse", is_flag=True, help="Recursive scan")
 @click.option("--out", type=click.Path(path_type=Path), default=None)
 def cli(manifest: Path, as_json: bool, as_html: bool, out: Path | None):
     root = parse_manifest(manifest)
@@ -103,51 +156,24 @@ def cli(manifest: Path, as_json: bool, as_html: bool, out: Path | None):
     counts = {"HIGH": 0, "MEDIUM": 0, "LOW": 0, "INFO": 0}
     for sev, _, _ in issues:
         counts[sev] += 1
-    lines = [f"[{sev}] {loc}: {msg}" for sev, loc, msg in issues]
-    lines.append("")
-    lines.append(f"Severity counts: HIGH={counts['HIGH']} MEDIUM={counts['MEDIUM']} LOW={counts['LOW']} INFO={counts['INFO']}")
-    text = "\n".join(lines)
+    sha = sha256_file(manifest)
+    if as_html:
+        text = render_html(root, issues, sha)
+    elif as_json:
+        payload = {"package": root.get("package", "?"), "sha256": sha,
+                   "issues": [{"severity": s, "location": l, "message": m} for s, l, m in issues],
+                   "counts": counts}
+        text = json.dumps(payload, indent=2)
+    else:
+        lines = [f"[{sev}] {loc}: {msg}" for sev, loc, msg in issues]
+        lines.append("")
+        lines.append(f"Severity counts: HIGH={counts['HIGH']} MEDIUM={counts['MEDIUM']} LOW={counts['LOW']} INFO={counts['INFO']}")
+        text = "\n".join(lines)
     if out:
         out.write_text(text)
         click.echo(f"Report written to {out}")
     else:
         click.echo(text)
+
 if __name__ == "__main__":
     cli()
-
-def render_html(root, issues, sha):
-    package = root.get("package", "?")
-    rows = "\n".join(
-        f"<tr><td class='{sev}'><b>{sev}</b></td><td>{loc}</td><td>{msg}</td></tr>"
-        for sev, loc, msg in issues)
-    return f'''<!doctype html><html><head><meta charset="utf-8">
-<style>body{{font-family:sans-serif;margin:2rem}}table{{border-collapse:collapse;width:100%}}
-td,th{{border:1px solid #ccc;padding:.4rem}}
-
-def batch_scan(directory: Path, recursive: bool = False) -> dict:
-    """Scan all XML files in directory."""
-    pattern = "**/*.xml" if recursive else "*.xml"
-    results = []
-    total_issues = {"HIGH": 0, "MEDIUM": 0, "LOW": 0, "INFO": 0}
-    
-    for xml_file in sorted(directory.glob(pattern)):
-        try:
-            root = parse_manifest(xml_file)
-            issues = triage(root)
-            for sev, _, _ in issues:
-                total_issues[sev] += 1
-            results.append({
-                "file": str(xml_file),
-                "package": root.get("package", "?"),
-                "issues": len(issues),
-                "high": sum(1 for s, _, _ in issues if s == "HIGH"),
-                "medium": sum(1 for s, _, _ in issues if s == "MEDIUM")
-            })
-        except Exception as e:
-            results.append({"file": str(xml_file), "error": str(e)})
-    
-    return {"results": results, "totals": total_issues}
-.HIGH{{background:#ffe1e1}}.MEDIUM{{background:#fff0cc}}
-.LOW{{background:#eef4ff}}.INFO{{background:#f5f5f5}}</style></head><body>
-<h1>Audit Report</h1><p><b>Package:</b> {package}</p><p><b>SHA-256:</b> <code>{sha}</code></p>
-<table><tr><th>Severity</th><th>Location</th><th>Message</th></tr>{rows}</table></body></html>'''
