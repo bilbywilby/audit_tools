@@ -1,0 +1,17 @@
+cat > bin/audit_tui << 'EOF'
+#!/usr/bin/env bash
+# ------------------------------------------------------------
+# audit_tui launcher - Full-screen Textual TUI
+# ------------------------------------------------------------
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+export PYTHONPATH="$PROJECT_ROOT/src:$PYTHONPATH"
+
+exec python3 -c "from tui.app import run; run('$@')"
+EOF
+
+chmod +x bin/audit_tui
