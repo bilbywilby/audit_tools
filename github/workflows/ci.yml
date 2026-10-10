@@ -1,0 +1,559 @@
+```yaml
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+    tags: ['v*']
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    # Run weekly on Sundays at 2 AM UTC
+    - cron: '0 2 * * 0'
+
+jobs:
+  # ────────────────────────────────────────────────────────────────────────
+  # TEST MATRIX - Run tests across Python versions and platforms
+  # ────────────────────────────────────────────────────────────────────────
+  test:
+    name: Test (${{ matrix.python-version }} / ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.12', '3.13']
+        os: [ubuntu-latest]
+        
+        # Additional platform matrices (uncomment as needed)
+        # os: [ubuntu-latest, macos-latest, windows-latest]
+        # python-version: ['3.10', '3.11', '3.12', '3.13']
+
+    steps:
+      # Step 1: Checkout code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for version detection
+
+      # Step 2: Set up Python
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'  # Automatic pip caching
+          cache-dependency-path: pyproject.toml
+
+      # Step 3: Install dependencies
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          pip install -e ".[dev]"
+          
+          # Install test dependencies if not in dev extras
+          pip install pytest pytest-cov pytest-xdist
+
+      # Step 4: Verify installation
+      - name: Verify installation
+        run: |
+          python -c "import lxml; print('lxml:', lxml.__version__)"
+          python -c "import pytest; print('pytest:', pytest.__version__)"
+          bin/audit_manifest --help
+
+      # Step 5: Run linting
+      - name: Lint with black and flake8
+        run: |
+          pip install black flake8
+          black --check src/ tests/
+          flake8 src/ tests/ --max-line-length=88 --extend-ignore=E203,W503
+
+      # Step 6: Run tests with coverage
+      - name: Run tests with coverage
+        run: |
+          pytest tests/ -v \
+            --cov=src/audit_manifest \
+            --cov-report=xml \
+            --cov-report=term-missing \
+            --junitxml=test-results.xml
+
+      # Step 7: Upload coverage report
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.xml
+          flags: unittests
+          env_vars: OS,PYTHON
+          name: codecov-umbrella-${{ matrix.python-version }}
+          fail_ci_if_error: false
+
+      # Step 8: Upload test results
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-${{ matrix.python-version }}-${{ matrix.os }}
+          path: test-results.xml
+          retention-days: 30
+
+  # ────────────────────────────────────────────────────────────────────────
+  # SECURITY SCANNING
+  # ────────────────────────────────────────────────────────────────────────
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install security tools
+        run: |
+          pip install bandit safety detect-secrets
+
+      - name: Run Bandit (Python security linter)
+        run: |
+          bandit -r src/ -ll -ii --exit-zero || true
+
+      - name: Run Safety (dependency vulnerability check)
+        run: |
+          safety check || true
+
+      - name: Run detect-secrets (secret scanning)
+        run: |
+          detect-secrets-hook --baseline .secrets.baseline || true
+
+  # ────────────────────────────────────────────────────────────────────────
+  # BUILD ARTIFACTS (Wheel/Sdist)
+  # ────────────────────────────────────────────────────────────────────────
+  build:
+    name: Build Package
+    runs-on: ubuntu-latest
+    needs: [test]
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip build
+
+      - name: Build distribution packages
+        run: |
+          python -m build --sdist --wheel
+
+      - name: Upload distribution packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-packages
+          path: dist/
+
+  # ────────────────────────────────────────────────────────────────────────
+  # DOCKER IMAGE BUILD (Optional)
+  # ────────────────────────────────────────────────────────────────────────
+  docker:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: [test, build]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix={{sha}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  # ────────────────────────────────────────────────────────────────────────
+  # RELEASE DEPLOYMENT (Tagged releases only)
+  # ────────────────────────────────────────────────────────────────────────
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [test, build, docker]
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    permissions:
+      contents: write
+      packages: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download distribution packages
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-packages
+          path: dist/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dist/*
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref, 'rc') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish to PyPI (optional)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        if: github.event_name == 'push' && !contains(github.ref, 'rc')
+        with:
+          user: __token__
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          skip_existing: true
+
+  # ────────────────────────────────────────────────────────────────────────
+  # NIGHTLY INTELLIGENT SCAN (Scheduled weekly)
+  # ────────────────────────────────────────────────────────────────────────
+  nightly-scan:
+    name: Nightly Intelligence Scan
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'schedule'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install -e ".[dev]"
+
+      - name: Run comprehensive test suite
+        run: |
+          pytest tests/ -v --tb=short --forked -n auto
+
+      - name: Run code quality checks
+        run: |
+          pip install radon xenon
+          radon cc src/ -a -oa
+          radon mi src/
+          xenon src/ --max-absolute=C --max-modules=A --max-average=B
+
+      - name: Upload intelligence report
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-intelligence-${{ github.run_id }}
+          path: |
+            coverage.xml
+            *.log
+          retention-days: 7
+
+  # ────────────────────────────────────────────────────────────────────────
+  # NOTIFICATIONS (Slack/Discord/Webhook)
+  # ────────────────────────────────────────────────────────────────────────
+  notify:
+    name: Send Notifications
+    runs-on: ubuntu-latest
+    needs: [test, build]
+    if: failure()  # Only notify on failure
+    permissions:
+      contents: read
+    steps:
+      - name: Send notification on failure
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          payload: |
+            {
+              "text": "❌ CI Failed - audit_tools",
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": ":x: CI Failed"
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Repository:*\n${{ github.repository }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Branch:*\n${{ github.ref_name }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Workflow:*\n${{ github.workflow }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*URL:*\n${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    }
+                  ]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        if: ${{ vars.NOTIFY_SLACK == 'true' }}
+```
+
+---
+
+## 📄 `.github/workflows/codeql.yml` (Optional Security Analysis)
+
+```yaml
+name: "CodeQL Analysis"
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    - cron: '30 1 * * 0'  # Weekly Sunday 1 AM UTC
+
+jobs:
+  analyze:
+    name: Analyze
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ['python']
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          queries: +security-and-quality
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{matrix.language}}"
+```
+
+---
+
+## 📄 `.github/workflows/stale.yml` (Issue Cleanup)
+
+```yaml
+name: "Close Stale Issues"
+
+on:
+  schedule:
+    - cron: '0 8 * * *'  # Daily at 8 AM UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/stale@v9
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          stale-issue-message: |
+            This issue has been automatically marked as stale because it has not had
+            recent activity. It will be closed if no further activity occurs.
+          stale-pr-message: |
+            This PR has been automatically marked as stale because it has not had
+            recent activity from the author. It will be closed if no further activity occurs.
+          days-before-stale: 60
+          days-before-close: 7
+          exempt-issue-labels: 'bug,enhancement,pinned,security'
+          exempt-pr-labels: 'bug,enhancement,pinned,security'
+          operations-per-run: 100
+```
+
+---
+
+## 📄 `.github/dependabot.yml` (Dependency Updates)
+
+```yaml
+version: 2
+updates:
+  # Python dependencies
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/New_York"
+    open-pull-requests-limit: 10
+    assignees:
+      - "bilbywilby"
+    reviewers:
+      - "security-team"
+    groups:
+      minor-patches:
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/New_York"
+    open-pull-requests-limit: 5
+
+  # Docker (if you add Dockerfile)
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+```
+
+---
+
+## 📄 `requirements.txt` (For Reproducibility)
+
+```txt
+# Runtime dependencies
+lxml>=6.0.0,<7.0.0
+
+# Development dependencies
+pytest>=8.0.0,<9.0.0
+pytest-cov>=4.0.0
+pytest-xdist>=3.0.0
+tox>=4.0.0
+black>=23.0.0
+flake8>=6.0.0
+bandit>=1.7.0
+safety>=2.0.0
+detect-secrets>=1.4.0
+pre-commit>=3.0.0
+build>=1.0.0
+```
+
+---
+
+## 🚀 Setup Instructions
+
+```bash
+cd ~/audit_tools
+
+# 1. Create the workflows directory
+mkdir -p .github/workflows
+
+# 2. Save the main CI file
+cat > .github/workflows/ci.yml << 'ENDCI'
+# Paste the full ci.yml content above
+ENDCI
+
+# 3. Add the optional files (if desired)
+cat > .github/workflows/codeql.yml << 'ENDQ'
+# Paste codeql.yml
+ENDQ
+
+# 4. Add dependabot
+cat > .github/dependabot.yml << 'ENDD'
+# Paste dependabot.yml
+ENDD
+
+# 5. Commit everything
+git add .github/
+git commit -m "ci: add comprehensive GitHub Actions workflow
+
+- Multi-version Python matrix (3.10-3.13)
+- Linting (black, flake8)
+- Security scanning (bandit, safety, detect-secrets)
+- Coverage reporting via Codecov
+- Docker image build on tags
+- PyPI publish on releases
+- Scheduled nightly scans
+- Failure notifications (optional)
+"
+git push origin main
+```
+
+---
+
+## ✅ What This Provides
+
+| Feature | Description |
+|---------|-------------|
+| **Matrix Testing** | Tests on Python 3.10, 3.11, 3.12, 3.13 simultaneously |
+| **Linting** | Black formatting + Flake8 style checks |
+| **Coverage** | Uploads to Codecov for test coverage tracking |
+| **Security** | Bandit (Python), Safety (deps), Detect-secrets (leaks) |
+| **Artifacts** | Preserves test results & wheels for download |
+| **Docker** | Builds multi-platform images on tagged releases |
+| **PyPI** | Publishes to Python Package Index on v*-tags |
+| **Notifications** | Slack/webhook alerts on CI failures |
+| **Scheduled Scans** | Weekly runs for ongoing quality checks |
+| **Stale Issues** | Auto-closes inactive issues/PRs |
+| **Dependabot** | Automatic dependency update PRs |
+
+---
+
+## 🎯 Enable in GitHub
+
+1. Go to **Actions** tab: https://github.com/bilbywilby/audit_tools/actions
+2. Click **"I understand my workflows"**
+3. Workflows will now run automatically!
