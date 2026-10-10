@@ -1,0 +1,98 @@
+/* Custom styles for TUI components */
+
+Screen {
+    background: #1a1a2e;
+}
+
+Header {
+    background: #16213e;
+    height: 3;
+}
+
+Footer {
+    background: #0f3460;
+    height: 2;
+}
+
+#main-container {
+    background: #1a1a2e;
+}
+
+.tab-title {
+    text-align: center;
+    text-style: bold;
+    color: #e94560;
+    height: 1;
+    margin-bottom: 1;
+}
+
+.section-title {
+    text-style: bold;
+    color: #e94560;
+    margin-top: 1;
+}
+
+.stat-label {
+    color: #a0a0a0;
+    text-align: right;
+}
+
+.stat-value {
+    text-style: bold;
+    color: #ffffff;
+    text-align: left;
+}
+
+#badge-row {
+    align-horizontal: center;
+    margin-bottom: 2;
+}
+
+#stats-grid {
+    grid-size: 2;
+    grid-gutter: 1 2;
+    margin-bottom: 2;
+}
+
+#scans-list {
+    height: 1fr;
+    border: solid #404080;
+    padding: 1;
+    overflow-y: auto;
+}
+
+#toolbar {
+    height: auto;
+    margin-bottom: 1;
+}
+
+#search-input {
+    width: 1fr;
+}
+
+#severity-toggles {
+    align-horizontal: center;
+    margin-bottom: 1;
+}
+
+#findings-table {
+    height: 1fr;
+    border: double #00ff88;
+    margin-top: 1;
+}
+
+#dashboard-footer {
+    height: 1;
+    text-align: right;
+    color: #808080;
+}
+
+.modal-header {
+    text-style: bold;
+    color: white;
+    margin-bottom: 1;
+}
+
+.filter-options {
+    align-vertical: middle;
+}
